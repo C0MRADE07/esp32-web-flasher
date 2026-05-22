@@ -1,0 +1,43 @@
+name: Build ESP32 Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      sketch_path:
+        description: 'Path to sketch file'
+        required: false
+        default: 'sketch/sketch.ino'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Compile ESP32 sketch
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: esp32:esp32:esp32
+          sketch-paths: sketch/
+          cli-compile-flags: |
+            - --export-binaries
+          libraries: |
+            - name: WiFiManager
+            - name: ElegantOTA
+            - name: ArduinoOTA
+
+      - name: Find compiled binary
+        id: find_bin
+        run: |
+          BIN=$(find sketch/ -name "*.ino.bin" | head -n 1)
+          echo "bin_path=$BIN" >> $GITHUB_OUTPUT
+          echo "Found binary: $BIN"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: ${{ steps.find_bin.outputs.bin_path }}
+          retention-days: 1
