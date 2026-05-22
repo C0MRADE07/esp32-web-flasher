@@ -884,7 +884,7 @@ async function deploy() {
 
 // ── TEMPLATES ──
 const TEMPLATES = {
-  MustInclude: '#include <WiFi.h>
+  MustInclude: `#include <WiFi.h>
 #include <WiFiManager.h>
 #include <WebServer.h>
 #include <ElegantOTA.h>
@@ -922,7 +922,7 @@ void loop() {
 
   // YOUR LOOP CODE BELOW
   
-}',
+}`,
   blink: `// LED Blink — ESP32
 #include <Arduino.h>
 
