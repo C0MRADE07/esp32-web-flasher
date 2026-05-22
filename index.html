@@ -1,1 +1,948 @@
-<h1>hello</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 Web Flasher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --surface: #111418;
+    --surface2: #181c22;
+    --border: #1e242e;
+    --border-bright: #2a3340;
+    --accent: #00e5a0;
+    --accent-dim: #00b87a;
+    --accent-glow: rgba(0,229,160,0.12);
+    --warn: #ff6b35;
+    --warn-dim: #cc5529;
+    --text: #c8d4e0;
+    --text-dim: #5a6a7a;
+    --text-bright: #eaf2ff;
+    --mono: 'Share Tech Mono', monospace;
+    --sans: 'Barlow', sans-serif;
+    --radius: 4px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scan-line overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-icon {
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--accent);
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+
+  .logo-icon::before {
+    content: '';
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 6px var(--accent);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .logo-text {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--text-bright);
+    letter-spacing: 0.05em;
+  }
+
+  .logo-text span { color: var(--accent); }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+
+  .status-dot.connected {
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+    animation: pulse 2s infinite;
+  }
+
+  .status-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+  }
+
+  .btn-icon {
+    background: none;
+    border: 1px solid var(--border-bright);
+    color: var(--text-dim);
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+  }
+
+  .btn-icon:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-glow);
+  }
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0 20px;
+    gap: 0;
+  }
+
+  .tab {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    padding: 10px 18px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.2s;
+    user-select: none;
+    text-transform: uppercase;
+  }
+
+  .tab:hover { color: var(--text); }
+
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .main {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 96px);
+  }
+
+  /* ── PANELS ── */
+  .panel { display: none; flex: 1; flex-direction: column; }
+  .panel.active { display: flex; }
+
+  /* ── EDITOR PANEL ── */
+  .editor-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .editor-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+    flex-shrink: 0;
+  }
+
+  .editor-info {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .editor-info span { color: var(--accent); }
+
+  .editor-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .btn-sm {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    padding: 4px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    border: 1px solid var(--border-bright);
+    background: none;
+    color: var(--text-dim);
+    transition: all 0.2s;
+  }
+
+  .btn-sm:hover {
+    border-color: var(--text-dim);
+    color: var(--text);
+  }
+
+  textarea#code {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    color: #a8d8a8;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 16px 20px;
+    tab-size: 2;
+    caret-color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+
+  textarea#code::selection {
+    background: rgba(0,229,160,0.2);
+  }
+
+  /* ── BOTTOM BAR ── */
+  .bottom-bar {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .deploy-btn {
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 12px 28px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.15s;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .deploy-btn:hover {
+    background: #00ffb3;
+    box-shadow: 0 0 20px rgba(0,229,160,0.4);
+    transform: translateY(-1px);
+  }
+
+  .deploy-btn:active { transform: translateY(0); }
+
+  .deploy-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .deploy-btn .btn-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
+    transform: translateX(-100%);
+    animation: shimmer 2s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+  }
+
+  .progress-wrap {
+    flex: 1;
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+
+  .deploy-status {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 140px;
+    text-align: right;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── LOG PANEL ── */
+  .log-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  .log-entry {
+    display: flex;
+    gap: 12px;
+    padding: 2px 0;
+    border-bottom: 1px solid transparent;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .log-time { color: var(--text-dim); flex-shrink: 0; }
+
+  .log-entry.info .log-msg { color: var(--text); }
+  .log-entry.ok .log-msg { color: var(--accent); }
+  .log-entry.error .log-msg { color: var(--warn); }
+  .log-entry.warn .log-msg { color: #f0b429; }
+
+  .log-prefix {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+  }
+
+  .log-entry.info .log-prefix { color: var(--text-dim); }
+  .log-entry.ok .log-prefix { color: var(--accent); }
+  .log-entry.error .log-prefix { color: var(--warn); }
+  .log-entry.warn .log-prefix { color: #f0b429; }
+
+  .log-clear {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: none;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.2s;
+  }
+
+  .log-clear:hover { color: var(--warn); border-color: var(--warn); }
+
+  /* ── SETTINGS PANEL ── */
+  .settings-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 20px;
+    max-width: 600px;
+  }
+
+  .settings-section {
+    margin-bottom: 32px;
+  }
+
+  .settings-section h3 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .form-group {
+    margin-bottom: 14px;
+  }
+
+  .form-label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .form-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    color: var(--text-bright);
+    font-family: var(--mono);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .form-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+  }
+
+  .form-input::placeholder { color: var(--text-dim); }
+
+  .form-hint {
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+
+  .warn-box {
+    background: rgba(255,107,53,0.08);
+    border: 1px solid rgba(255,107,53,0.25);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #ffb08a;
+    line-height: 1.5;
+    margin-bottom: 14px;
+  }
+
+  .warn-box strong { color: var(--warn); }
+
+  .btn-save {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 9px 20px;
+    background: var(--surface2);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-save:hover {
+    background: var(--accent-glow);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+
+  .saved-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    opacity: 0;
+    transition: opacity 0.3s;
+    margin-left: 10px;
+  }
+
+  .saved-badge.show { opacity: 1; }
+
+  /* ── MOBILE ── */
+  @media (max-width: 600px) {
+    .logo-text { font-size: 13px; }
+    .deploy-btn { padding: 11px 20px; font-size: 13px; }
+    .deploy-status { display: none; }
+    .settings-wrap { padding: 16px; }
+    header { padding: 10px 14px; }
+  }
+
+  /* ── SCROLLBARS ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon"></div>
+    <div class="logo-text">ESP32<span>/</span>FLASHER</div>
+  </div>
+  <div class="header-right">
+    <div class="status-dot" id="statusDot"></div>
+    <div class="status-label" id="statusLabel">OFFLINE</div>
+    <button class="btn-icon" id="pingBtn" title="Check ESP32 connection" onclick="pingESP32()">⚡</button>
+    <button class="btn-icon" title="Settings" onclick="switchTab('settings')">⚙</button>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="editor" onclick="switchTab('editor')">EDITOR</div>
+  <div class="tab" data-tab="log" onclick="switchTab('log')">LOG</div>
+  <div class="tab" data-tab="settings" onclick="switchTab('settings')">SETTINGS</div>
+</div>
+
+<!-- ── EDITOR PANEL ── -->
+<div class="main">
+  <div class="panel active" id="panel-editor">
+    <div class="editor-toolbar">
+      <div class="editor-info">main<span>.ino</span> — ESP32</div>
+      <div class="editor-actions">
+        <button class="btn-sm" onclick="loadTemplate('blink')">BLINK</button>
+        <button class="btn-sm" onclick="loadTemplate('servo')">SERVO</button>
+        <button class="btn-sm" onclick="loadTemplate('clear')">CLEAR</button>
+      </div>
+    </div>
+    <div class="editor-wrap">
+      <textarea id="code" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="// Paste your ESP32 sketch here…"></textarea>
+    </div>
+    <div class="bottom-bar">
+      <button class="deploy-btn" id="deployBtn" onclick="deploy()">
+        <span class="btn-shimmer"></span>
+        ▶ DEPLOY
+      </button>
+      <div class="progress-wrap">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="deploy-status" id="deployStatus">READY</div>
+    </div>
+  </div>
+
+  <!-- ── LOG PANEL ── -->
+  <div class="panel" id="panel-log">
+    <div class="editor-toolbar">
+      <div class="editor-info">Build &amp; Flash Log</div>
+      <button class="log-clear" onclick="clearLog()">CLEAR LOG</button>
+    </div>
+    <div class="log-wrap" id="logWrap"></div>
+  </div>
+
+  <!-- ── SETTINGS PANEL ── -->
+  <div class="panel" id="panel-settings">
+    <div class="settings-wrap">
+
+      <div class="settings-section">
+        <h3>GitHub</h3>
+        <div class="warn-box">
+          <strong>⚠ Security:</strong> Your token is stored only in localStorage on this device. Never commit it to your repo. Regenerate immediately if leaked.
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ghToken">Personal Access Token (repo scope)</label>
+          <input class="form-input" type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+          <div class="form-hint">Generate at GitHub → Settings → Developer Settings → Tokens (classic)</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ghUser">GitHub Username</label>
+          <input class="form-input" type="text" id="ghUser" placeholder="C0MRADE07">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ghRepo">Repository Name</label>
+          <input class="form-input" type="text" id="ghRepo" placeholder="esp32-web-flasher">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ghBranch">Branch</label>
+          <input class="form-input" type="text" id="ghBranch" placeholder="main">
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>ESP32 OTA</h3>
+        <div class="form-group">
+          <label class="form-label" for="espIP">ESP32 IP Address</label>
+          <input class="form-input" type="text" id="espIP" placeholder="10.150.148.220">
+          <div class="form-hint">Check your hotspot's DHCP table — may change on reconnect</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="espPassword">OTA Password</label>
+          <input class="form-input" type="password" id="espPassword" placeholder="esp32pass">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="espHostname">OTA Hostname</label>
+          <input class="form-input" type="text" id="espHostname" placeholder="esp32-ota">
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Build</h3>
+        <div class="form-group">
+          <label class="form-label" for="pollInterval">GitHub Actions Poll Interval (ms)</label>
+          <input class="form-input" type="number" id="pollInterval" placeholder="5000" min="2000" max="30000">
+          <div class="form-hint">How often to check if the build has completed (min 2000ms)</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="buildTimeout">Build Timeout (ms)</label>
+          <input class="form-input" type="number" id="buildTimeout" placeholder="180000" min="30000">
+          <div class="form-hint">Abort waiting after this duration (default 3 min)</div>
+        </div>
+      </div>
+
+      <button class="btn-save" onclick="saveSettings()">SAVE TO DEVICE</button>
+      <span class="saved-badge" id="savedBadge">✓ SAVED</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── STATE ──
+const cfg = {
+  ghToken: '', ghUser: 'C0MRADE07', ghRepo: 'esp32-web-flasher',
+  ghBranch: 'main', espIP: '10.150.148.220', espPassword: 'esp32pass',
+  espHostname: 'esp32-ota', pollInterval: 5000, buildTimeout: 180000
+};
+
+// ── STORAGE ──
+function loadSettings() {
+  const saved = localStorage.getItem('esp32_flasher_cfg');
+  if (saved) Object.assign(cfg, JSON.parse(saved));
+  document.getElementById('ghToken').value = cfg.ghToken || '';
+  document.getElementById('ghUser').value = cfg.ghUser;
+  document.getElementById('ghRepo').value = cfg.ghRepo;
+  document.getElementById('ghBranch').value = cfg.ghBranch;
+  document.getElementById('espIP').value = cfg.espIP;
+  document.getElementById('espPassword').value = cfg.espPassword;
+  document.getElementById('espHostname').value = cfg.espHostname;
+  document.getElementById('pollInterval').value = cfg.pollInterval;
+  document.getElementById('buildTimeout').value = cfg.buildTimeout;
+}
+
+function saveSettings() {
+  cfg.ghToken    = document.getElementById('ghToken').value.trim();
+  cfg.ghUser     = document.getElementById('ghUser').value.trim();
+  cfg.ghRepo     = document.getElementById('ghRepo').value.trim();
+  cfg.ghBranch   = document.getElementById('ghBranch').value.trim();
+  cfg.espIP      = document.getElementById('espIP').value.trim();
+  cfg.espPassword= document.getElementById('espPassword').value.trim();
+  cfg.espHostname= document.getElementById('espHostname').value.trim();
+  cfg.pollInterval = parseInt(document.getElementById('pollInterval').value) || 5000;
+  cfg.buildTimeout = parseInt(document.getElementById('buildTimeout').value) || 180000;
+  localStorage.setItem('esp32_flasher_cfg', JSON.stringify(cfg));
+  const badge = document.getElementById('savedBadge');
+  badge.classList.add('show');
+  setTimeout(() => badge.classList.remove('show'), 2000);
+  log('Settings saved to localStorage', 'ok');
+}
+
+// ── TABS ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+}
+
+// ── LOG ──
+function log(msg, type = 'info') {
+  const wrap = document.getElementById('logWrap');
+  const icons = { info: '·', ok: '✓', error: '✗', warn: '!' };
+  const now = new Date().toTimeString().slice(0,8);
+  const el = document.createElement('div');
+  el.className = 'log-entry ' + type;
+  el.innerHTML = `<span class="log-time">${now}</span><span class="log-prefix">${icons[type]}</span><span class="log-msg">${msg}</span>`;
+  wrap.appendChild(el);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('logWrap').innerHTML = '';
+}
+
+// ── STATUS ──
+function setStatus(text, connected = false) {
+  document.getElementById('statusLabel').textContent = text;
+  document.getElementById('statusDot').className = 'status-dot' + (connected ? ' connected' : '');
+}
+
+function setProgress(pct, statusText) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('deployStatus').textContent = statusText;
+}
+
+// ── PING ESP32 ──
+async function pingESP32() {
+  if (!cfg.espIP) { log('No ESP32 IP set in Settings', 'warn'); return; }
+  log(`Pinging http://${cfg.espIP}/ …`, 'info');
+  setStatus('PINGING…');
+  try {
+    const r = await fetch(`http://${cfg.espIP}/`, { signal: AbortSignal.timeout(4000) });
+    if (r.ok) { setStatus('ONLINE', true); log('ESP32 responded — OTA ready', 'ok'); }
+    else { setStatus('ERROR'); log(`ESP32 returned HTTP ${r.status}`, 'warn'); }
+  } catch(e) {
+    setStatus('OFFLINE');
+    log(`No response from ${cfg.espIP}: ${e.message}`, 'error');
+  }
+}
+
+// ── GITHUB API HELPERS ──
+async function ghAPI(path, options = {}) {
+  const res = await fetch(`https://api.github.com${path}`, {
+    ...options,
+    headers: {
+      'Authorization': `token ${cfg.ghToken}`,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+  return res;
+}
+
+async function pushCodeToGitHub(code) {
+  log('Checking existing file on GitHub…', 'info');
+  const filePath = `sketch/sketch.ino`;
+  const getRes = await ghAPI(`/repos/${cfg.ghUser}/${cfg.ghRepo}/contents/${filePath}`);
+  let sha = undefined;
+  if (getRes.ok) { const data = await getRes.json(); sha = data.sha; }
+
+  log(`Pushing code to ${cfg.ghUser}/${cfg.ghRepo}/${filePath}…`, 'info');
+  const body = { message: `OTA deploy ${new Date().toISOString()}`, content: btoa(unescape(encodeURIComponent(code))), branch: cfg.ghBranch };
+  if (sha) body.sha = sha;
+  const putRes = await ghAPI(`/repos/${cfg.ghUser}/${cfg.ghRepo}/contents/${filePath}`, { method: 'PUT', body: JSON.stringify(body) });
+  if (!putRes.ok) throw new Error(`GitHub push failed: ${putRes.status} ${await putRes.text()}`);
+  log('Code pushed ✓', 'ok');
+}
+
+async function triggerAndWaitForBuild() {
+  log('Triggering GitHub Actions workflow…', 'info');
+  // Dispatch workflow_dispatch event
+  const dispatchRes = await ghAPI(`/repos/${cfg.ghUser}/${cfg.ghRepo}/actions/workflows/build.yml/dispatches`, {
+    method: 'POST',
+    body: JSON.stringify({ ref: cfg.ghBranch })
+  });
+  if (!dispatchRes.ok && dispatchRes.status !== 204) {
+    log('workflow_dispatch failed — build may be triggered by push event instead', 'warn');
+  }
+
+  // Poll for the latest run
+  log('Waiting for build to start…', 'info');
+  const deadline = Date.now() + cfg.buildTimeout;
+  let runId = null;
+
+  while (Date.now() < deadline) {
+    await sleep(cfg.pollInterval);
+    const runsRes = await ghAPI(`/repos/${cfg.ghUser}/${cfg.ghRepo}/actions/runs?branch=${cfg.ghBranch}&per_page=5`);
+    if (!runsRes.ok) continue;
+    const runs = (await runsRes.json()).workflow_runs || [];
+    const running = runs.find(r => r.status === 'in_progress' || r.status === 'queued');
+    if (running) { runId = running.id; log(`Build started (run #${runId})`, 'ok'); break; }
+  }
+
+  if (!runId) throw new Error('Build never started — check your GitHub Actions workflow');
+
+  log('Waiting for build to complete…', 'info');
+  let lastStatus = '';
+  while (Date.now() < deadline) {
+    await sleep(cfg.pollInterval);
+    const runRes = await ghAPI(`/repos/${cfg.ghUser}/${cfg.ghRepo}/actions/runs/${runId}`);
+    if (!runRes.ok) continue;
+    const run = await runRes.json();
+    if (run.status !== lastStatus) { log(`Build: ${run.status}`, 'info'); lastStatus = run.status; }
+    if (run.status === 'completed') {
+      if (run.conclusion === 'success') { log('Build succeeded ✓', 'ok'); return runId; }
+      else throw new Error(`Build failed: ${run.conclusion}. Check Actions logs.`);
+    }
+  }
+  throw new Error('Build timed out');
+}
+
+async function downloadBinary(runId) {
+  log('Fetching build artifacts…', 'info');
+  const res = await ghAPI(`/repos/${cfg.ghUser}/${cfg.ghRepo}/actions/runs/${runId}/artifacts`);
+  if (!res.ok) throw new Error('Could not fetch artifacts');
+  const data = await res.json();
+  const artifact = (data.artifacts || []).find(a => a.name.includes('firmware') || a.name.includes('bin'));
+  if (!artifact) throw new Error('No firmware artifact found — ensure your workflow uploads the .bin');
+
+  log(`Downloading artifact: ${artifact.name} (${formatBytes(artifact.size_in_bytes)})…`, 'info');
+  const dlRes = await ghAPI(`/repos/${cfg.ghUser}/${cfg.ghRepo}/actions/artifacts/${artifact.id}/zip`);
+  if (!dlRes.ok) throw new Error('Artifact download failed');
+  // GitHub returns a redirect; fetch follows it
+  const blob = await dlRes.blob();
+  log('Binary downloaded ✓', 'ok');
+  return blob;
+}
+
+async function flashViaOTA(firmwareBlob) {
+  log(`Flashing to ESP32 at ${cfg.espIP} via OTA…`, 'info');
+  // espota-style HTTP upload to ArduinoOTA
+  const url = `http://${cfg.espIP}/update`;
+  const formData = new FormData();
+  formData.append('file', firmwareBlob, 'firmware.bin');
+
+  const headers = {};
+  if (cfg.espPassword) {
+    headers['Authorization'] = 'Basic ' + btoa(':' + cfg.espPassword);
+  }
+
+  const res = await fetch(url, { method: 'POST', headers, body: formData, signal: AbortSignal.timeout(60000) });
+  if (!res.ok) throw new Error(`OTA flash failed: ${res.status} ${await res.text()}`);
+  log('Flash complete ✓', 'ok');
+}
+
+// ── DEPLOY ORCHESTRATOR ──
+async function deploy() {
+  const code = document.getElementById('code').value.trim();
+  if (!code) { log('Nothing to deploy — editor is empty', 'warn'); return; }
+  if (!cfg.ghToken) { log('No GitHub token — go to Settings', 'error'); switchTab('settings'); return; }
+  if (!cfg.espIP) { log('No ESP32 IP set — go to Settings', 'error'); switchTab('settings'); return; }
+
+  switchTab('log');
+  const btn = document.getElementById('deployBtn');
+  btn.disabled = true;
+
+  try {
+    log('══ DEPLOY STARTED ══', 'ok');
+    setProgress(5, 'PUSHING…');
+    await pushCodeToGitHub(code);
+
+    setProgress(20, 'BUILDING…');
+    const runId = await triggerAndWaitForBuild();
+
+    setProgress(70, 'DOWNLOADING…');
+    const bin = await downloadBinary(runId);
+
+    setProgress(85, 'FLASHING…');
+    await flashViaOTA(bin);
+
+    setProgress(100, 'DONE ✓');
+    setStatus('FLASHED', true);
+    log('══ DEPLOY COMPLETE ══', 'ok');
+    setTimeout(() => setProgress(0, 'READY'), 3000);
+
+  } catch(err) {
+    log(`ERROR: ${err.message}`, 'error');
+    setProgress(0, 'FAILED');
+    setStatus('ERROR');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── TEMPLATES ──
+const TEMPLATES = {
+  blink: `// LED Blink — ESP32
+#include <Arduino.h>
+
+#define LED_PIN 2
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  Serial.println("Blink ready");
+}
+
+void loop() {
+  digitalWrite(LED_PIN, HIGH);
+  delay(500);
+  digitalWrite(LED_PIN, LOW);
+  delay(500);
+}`,
+  servo: `// Servo Sweep — ESP32
+#include <ESP32Servo.h>
+
+Servo myServo;
+const int SERVO_PIN = 13;
+
+void setup() {
+  Serial.begin(115200);
+  myServo.attach(SERVO_PIN);
+  Serial.println("Servo ready");
+}
+
+void loop() {
+  for (int pos = 0; pos <= 180; pos++) {
+    myServo.write(pos);
+    delay(10);
+  }
+  for (int pos = 180; pos >= 0; pos--) {
+    myServo.write(pos);
+    delay(10);
+  }
+}`
+};
+
+function loadTemplate(name) {
+  if (name === 'clear') { document.getElementById('code').value = ''; return; }
+  document.getElementById('code').value = TEMPLATES[name] || '';
+}
+
+// ── UTILS ──
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+
+// ── INIT ──
+loadSettings();
+log('ESP32 Web Flasher ready', 'ok');
+log('Go to Settings to configure your GitHub token and ESP32 IP', 'info');
+</script>
+</body>
+</html>
