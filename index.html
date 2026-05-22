@@ -884,6 +884,45 @@ async function deploy() {
 
 // ── TEMPLATES ──
 const TEMPLATES = {
+  MustInclude: '#include <WiFi.h>
+#include <WiFiManager.h>
+#include <WebServer.h>
+#include <ElegantOTA.h>
+#include <ArduinoOTA.h>
+
+WebServer server(80);
+
+void otaSetup() {
+  WiFiManager wm;
+  wm.autoConnect("ESP32-Setup");
+  ElegantOTA.begin(&server, "admin", "esp32pass");
+  ElegantOTA.loop();
+  server.on("/ping", HTTP_GET, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "text/plain", "pong");
+  });
+  ArduinoOTA.setHostname("esp32-ota");
+  ArduinoOTA.setPassword("esp32pass");
+  ArduinoOTA.begin();
+  server.begin();
+}
+
+void setup() {
+  Serial.begin(115200);
+  otaSetup(); // ← don't remove this
+
+  // YOUR SETUP CODE BELOW
+  
+}
+
+void loop() {
+  server.handleClient();
+  ArduinoOTA.handle();
+  ElegantOTA.loop();
+
+  // YOUR LOOP CODE BELOW
+  
+}',
   blink: `// LED Blink — ESP32
 #include <Arduino.h>
 
